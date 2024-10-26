@@ -24,8 +24,22 @@ spotify_secret = os.getenv('SPOTIFY_CLIENT_SECRET')
 
 def get_db():
     if 'db' not in g:
-        g.db = MongoClient(MONGO_URI, server_api=ServerApi('1'), tlsCAFile=certifi.where())
-        g.db = g.db['musicData']
+        try:
+            # Connect to the client first
+            client = MongoClient(
+                MONGO_URI,
+                server_api=ServerApi('1'),
+                tlsCAFile=certifi.where(),
+                ssl=True,
+                retryWrites=True
+            )
+            # Then select the database
+            g.db = client['musicData']
+            # Test the connection
+            client.admin.command('ping')
+        except Exception as e:
+            app.logger.error(f"Database connection error: {str(e)}")
+            raise
     return g.db
 
 
@@ -37,8 +51,12 @@ def close_db(error):
 
 
 def get_collection(name: str):
-    db = get_db()
-    return db[name]
+    try:
+        db = get_db()
+        return db[name]
+    except Exception as e:
+        app.logger.error(f"Error getting collection {name}: {str(e)}")
+        raise
 
 
 @app.route('/album', methods=['GET'])
