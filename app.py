@@ -41,11 +41,6 @@ def get_collection(name: str):
     return db[name]
 
 
-@app.route('/')
-def hello_world():  # put application's code here
-    return 'Hello World!'
-
-
 @app.route('/album', methods=['GET'])
 def get_all_albums():
     collection = get_collection('musicRating')
