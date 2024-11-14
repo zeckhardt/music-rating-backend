@@ -1,4 +1,5 @@
 import base64
+import json
 import os
 import firebase_admin
 import requests
@@ -15,8 +16,10 @@ CORS(app)
 app.config['ENV'] = os.getenv('FLASK_ENV')
 spotify_id = os.getenv('SPOTIFY_CLIENT_ID')
 spotify_secret = os.getenv('SPOTIFY_CLIENT_SECRET')
+firebase_cert_str = os.getenv('FIREBASE_CERT', '{}')
+firebase_cert = json.loads(firebase_cert_str)
 
-cred = credentials.Certificate('./firebase-key.json')
+cred = credentials.Certificate(firebase_cert)
 firebase_admin.initialize_app(cred)
 
 db = firestore.client()
