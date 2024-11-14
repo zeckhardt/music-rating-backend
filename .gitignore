@@ -1,2 +1,4 @@
 .env
 test.py
+firebase-key.json
+__pycache__/

@@ -1,14 +1,10 @@
-import json
-
-from flask import Flask, g, jsonify, request, abort
-from dotenv import load_dotenv
-import os
-from pymongo import MongoClient
-from pymongo.server_api import ServerApi
-from pymongo.errors import PyMongoError
-import requests
-import certifi
 import base64
+import os
+import firebase_admin
+import requests
+from dotenv import load_dotenv
+from firebase_admin import credentials, firestore
+from flask import Flask, jsonify, request, abort
 from flask_cors import CORS
 
 load_dotenv()
@@ -16,115 +12,89 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 
-MONGO_URI = os.getenv('DATABASE_URI')
 app.config['ENV'] = os.getenv('FLASK_ENV')
 spotify_id = os.getenv('SPOTIFY_CLIENT_ID')
 spotify_secret = os.getenv('SPOTIFY_CLIENT_SECRET')
 
+cred = credentials.Certificate('./firebase-key.json')
+firebase_admin.initialize_app(cred)
 
-def get_db():
-    if 'db' not in g:
-        try:
-            # Connect to the client first
-            client = MongoClient(
-                MONGO_URI,
-                server_api=ServerApi('1'),
-                tlsCAFile=certifi.where(),
-                ssl=True,
-                retryWrites=True
-            )
-            # Then select the database
-            g.db = client['musicData']
-            # Test the connection
-            client.admin.command('ping')
-        except Exception as e:
-            app.logger.error(f"Database connection error: {str(e)}")
-            raise
-    return g.db
-
-
-@app.teardown_appcontext
-def close_db(error):
-    db = g.pop('db', None)
-    if db is not None:
-        db.client.close()
-
-
-def get_collection(name: str):
-    try:
-        db = get_db()
-        return db[name]
-    except Exception as e:
-        app.logger.error(f"Error getting collection {name}: {str(e)}")
-        raise
+db = firestore.client()
 
 
 @app.route('/album', methods=['GET'])
 def get_all_albums():
-    collection = get_collection('musicRating')
     try:
-        cursor = collection.find({})
-        data = list(cursor)
-        if not data:
-            abort(404, 'error no ratings could be found')
-        return json.dumps(data, default=str), 200
-    except PyMongoError as e:
-        return jsonify({'error': e}), 500
+        docs = db.collection('prod-ratings').stream()
+
+        albums = [doc.to_dict() for doc in docs]
+
+        return jsonify(albums), 200
+    except Exception as e:
+        return {f'[Error] Could retrieve albums: {e}'}, 500
 
 
 @app.route('/album/by-artist/<string:artist_name>', methods=['GET'])
 def get_artist_albums(artist_name: str):
-    collection = get_collection('musicRating')
     try:
-        cursor = collection.find({'artistName': artist_name})
-        albums = list(cursor)
+        query = db.collection('prod-ratings').where('artistName', '==', artist_name)
+        docs = query.stream()
+
+        albums = [doc.to_dict() for doc in docs]
+
         if not albums:
             abort(404, 'error artist does not exist')
-        return json.dumps(albums, default=str), 200
-    except PyMongoError as e:
-        return jsonify({'error': e}), 500
+
+        return jsonify(albums), 200
+    except Exception as e:
+        return {f'[Error] Could retrieve albums: {e}'}, 500
 
 
 @app.route('/album', methods=['POST'])
 def add_rating():
     data = request.get_json()
+
     if not data:
-        abort(400, 'error please specify request body')
+        abort(400, '[Error] please specify request body')
 
     try:
-        collection = get_collection('musicRating')
-        result = collection.insert_one(data)
+        result = db.collection('prod-ratings').add(data)
 
         if not result:
-            abort(400, 'error item could not be added to database')
+            abort(400, '[Error] item could not be added to database')
+
         return jsonify('Data successfully added'), 200
-    except PyMongoError as e:
-        return jsonify({'error': e}), 500
+    except Exception as e:
+        return {f'[Error] Could add album: {e}'}, 500
 
 
 @app.route('/album', methods=['PUT'])
 def update_rating():
-    collection = get_collection('musicRating')
     data = request.get_json()
-    if not data:
-        abort(400, 'error please specify request body')
 
-    query = {'albumName': data['name']}
-    new_values = {
-        '$set': {
-            'albumRating': data['rating'],
-            'albumReview': data['review']
-        }
-    }
+    if not data:
+        abort(400, '[Error] please specify request body')
+
+    query = db.collection('prod-ratings').where('albumName', '==', data['name'])
 
     try:
-        result = collection.update_one(query, new_values)
-        if result.matched_count > 0:
-            return 200
+        docs = query.stream()
+        updated = False
+
+        for doc in docs:
+            doc.reference.update({
+                'albumRating': data['rating'],
+                'albumReview': data['review']
+            })
+
+            updated = True
+
+        if updated:
+            return 'Album successfully updated', 200
         else:
-            abort(404, 'error the item could not be update (not found)')
-    except PyMongoError as e:
-        return jsonify({'error': str(e)}), 500
+            abort(404, '[Error] Album could not be updated')
+    except Exception as e:
+        return {f'[Error] Could update album: {e}'}, 500
 
 
 def get_access_token():
