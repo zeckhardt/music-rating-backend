@@ -11,7 +11,7 @@ from flask_cors import CORS
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "https://zeckhardt.github.io"}})
 
 app.config['ENV'] = os.getenv('FLASK_ENV')
 spotify_id = os.getenv('SPOTIFY_CLIENT_ID')
